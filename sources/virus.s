@@ -1,7 +1,7 @@
 ; #define AT_FDCWD		-100	/* Special value used to indicate
 ;								openat should use the current
 ;								working directory. */
-; kernel call 295
+; kernel call 257
 ; int openat(int dirfd, const char *pathname, int flags);
 ;	returns fd, -1 error
 ;______________________________________________________________________________
@@ -30,6 +30,9 @@ search:
 	; # BODY
 	mov rsi, rdi
 	mov rdi, -100 ; AT_FDCWD
+	mov rdx, 591872 ; O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY
+	mov rax, 257 ; OPENAT KERNEL CODE
+	syscall
 
 	; # EPILOGUE
 	; # STACK
@@ -73,7 +76,7 @@ code:
 	ret ;
 
 _start:
-	push 0x48
+	push 0x2E ; FOLDER TO PARSE '.'
 	lea rdi, [rsp]
 	call search
 	call code

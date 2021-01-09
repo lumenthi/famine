@@ -5,15 +5,15 @@
 ; int openat(int dirfd, const char *pathname, int flags);
 ;	returns fd, -1 error
 ;______________________________________________________________________________
-; kernel call 108
+; kernel call 5
 ; int fstat(int fd, struct stat *statbuf);
 ;	return 0 if succes, -1 error
 ;______________________________________________________________________________
-; kernel call 221, 141 for 32 bits version
+; kernel call 217, 78 for 32 bits version
 ; int getdents64(unsigned int fd, struct linux_dirent64 *dirp, unsigned int count);
 ;	returns number of bytes read, -1 error
 ;______________________________________________________________________________
-; kernel call 6
+; kernel call 3
 ; int close(int fd);
 ;	osef
 
@@ -28,11 +28,20 @@ search:
 	mov rbp, rsp ; ALIGN RBP TO RSP
 
 	; # BODY
-	mov rsi, rdi
-	mov rdi, -100 ; AT_FDCWD
-	mov rdx, 591872 ; O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY
+	; # OPENAT CALL, TODO: CHECK RETURN VALUE
+	mov rsi, rdi ; SEARCH ARG (PATHNAME 
+	mov rdi, -100 ; AT_FDCWD, start from current dir (relative path)
+	mov rdx, 0x90800 ; O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY
 	mov rax, 257 ; OPENAT KERNEL CODE
 	syscall
+	; # GETDENTS CALL
+	mov rdi, rax ; FD FROM OPENAT
+	mov rax, 217 ; GETDENTS64 KERNEL CODE
+	sub rsp, 4096 ; ADD 1 PAGE TO THE STACK, TODO: CHECK IF CRASH WHEN FOLDER 2 BIG
+				  ; LS getdents64: getdents64(3, /* 9 entries */, 32768)
+				  ; BUFFER SIZE: 32768
+	mov edx, 4096 ; SPECIFY THE SIZE OF OUR BUFFER TO OPENAT
+	syscall ; RETURNS NUMBER OF BYTES READ
 
 	; # EPILOGUE
 	; # STACK
@@ -77,7 +86,7 @@ code:
 
 _start:
 	push 0x2E ; FOLDER TO PARSE '.'
-	lea rdi, [rsp]
+	lea rdi, [rsp] ; GET POINTER STACK ADDRESS FOR OUR PATHNAME
 	call search
 	call code
 	mov rax, 60

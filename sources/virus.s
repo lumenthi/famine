@@ -29,7 +29,7 @@ search:
 
 	; # BODY
 	; # OPENAT CALL, TODO: CHECK RETURN VALUE
-	mov rsi, rdi ; SEARCH ARG (PATHNAME 
+	mov rsi, rdi ; SEARCH ARG (PATHNAME)
 	mov rdi, -100 ; AT_FDCWD, start from current dir (relative path)
 	mov rdx, 0x90800 ; O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY
 	mov rax, 257 ; OPENAT KERNEL CODE
@@ -40,9 +40,29 @@ search:
 	sub rsp, 4096 ; ADD 1 PAGE TO THE STACK, TODO: CHECK IF CRASH WHEN FOLDER 2 BIG
 				  ; LS getdents64: getdents64(3, /* 9 entries */, 32768)
 				  ; BUFFER SIZE: 32768
+	mov rsi, rsp ; *DIRP BUFFER ADDRESS
 	mov edx, 4096 ; SPECIFY THE SIZE OF OUR BUFFER TO OPENAT
 	syscall ; RETURNS NUMBER OF BYTES READ
+	; # CLOSE OPENAT FD
+	push rax ; BACKUP GETDENTS RET
+	mov rax, 3 ; CLOSE KERNEL CODE
+	syscall
+	pop rax ; GET BACK OUR RAX VALUE
+	; # GO PARSE OUR RET STRUCTS
+	; START OF STRUCT STACK
+	mov rsi, rsp ; THE START OF OUR RET STRUCT STORED IN RSI
+	; END OF STRUCT STACK
+	mov rdi, rsp ; STOCK RSP IN RDI SO I CAN ADD GETDENTS RET TO DETERMINE THE SIZE
+	add rdi, rax ; THE END OF OUR RET STRUCT STORED IN RDI
+	;
+	add rsi, 10 ; D_NAME (10 BYTES)
 
+	; #########
+	mov rax, 1
+	mov rdi, 1
+	mov rdx, 10
+	syscall
+	; #########
 	; # EPILOGUE
 	; # STACK
 	mov rsp, rbp ; SET THE CURRENT STACK POINTER POINTING TO OUR SAVED RBP

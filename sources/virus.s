@@ -29,6 +29,30 @@ global _start
 
 section .text
 
+open_file:
+	; # PROLOGUE
+	; # STACK
+	push rbp ; PUSH rbp IN STACK SO WE CAN KEEP A BACKUP OF OLD STACK BASE ADDRESS
+	mov rbp, rsp ; ALIGN RBP TO RSP
+
+	; # BODY
+	; # OPEN
+	mov rax, 2 ; OPEN KERNEL CODE
+	mov rdi, rdx ; PATHNAME
+	mov rsi, 0 ; O_RDONLY
+	syscall
+	; # CLOSE
+	mov rdi, rax
+	mov rax, 3
+	syscall
+
+	; # EPILOGUE
+	; # STACK
+	mov rsp, rbp ; SET THE CURRENT STACK POINTER POINTING TO OUR SAVED RBP
+	pop rbp ; CLEAN THE STACK, REMOVE OUR RBP BACKUP NOW THAT WE REASSIGNED IT
+	ret ;
+
+
 search:
 	; # PROLOGUE
 	; # STACK
@@ -58,18 +82,35 @@ search:
 	pop rax ; GET BACK OUR RAX VALUE
 	; # GO PARSE OUR RET STRUCTS
 	; START OF STRUCT STACK
-	mov rsi, rsp ; THE START OF OUR RET STRUCT STORED IN RSI
+	mov rdi, rsp ; THE START OF OUR RET STRUCT STORED IN RDI
 	; END OF STRUCT STACK
-	mov rdi, rsp ; STOCK RSP IN RDI SO I CAN ADD GETDENTS RET TO DETERMINE THE SIZE
-	add rdi, rax ; THE END OF OUR RET STRUCT STORED IN RDI
-	;
-	add rsi, 19 ; D_NAME (19 BYTES FROM START OF STRUCT)
+	mov rsi, rsp ; STOCK RSP IN RDI SO I CAN ADD GETDENTS RET TO DETERMINE THE SIZE
+	add rsi, rax ; THE END OF OUR RET STRUCT STORED IN RSI
 
-	; #########
-	mov rax, 1
-	mov rdi, 1
-	mov rdx, 19
-	syscall
+parse_dir:
+	; ### VALUES ###
+	; RDI = START OF CURRENT STRUCT
+	; RSI = END
+	; RCX = D_RECLEN OF CURRENT STRUCT
+	; RDX = D_NAME OF CURRENT STRUCT
+	; GET RECLEN
+	mov rcx, 0
+	mov cx, word[rdi + 16] ; OMFG FINALLY GOT IT
+	; GET D_NAME
+	lea rdx, [rdi + 19]
+	push rdi
+	push rsi
+	push rcx
+	push rdx
+	call open_file
+	pop rdx
+	pop rcx
+	pop rsi
+	pop rdi
+	; LOOP INSTRUCTIONS
+	add rdi, rcx ; MOVING OUR CURRENT STRUCT TO THE NEXT ONE BY ADDING RECLEN
+	cmp qword[rdx - 8], 0x00 ; CHECK IF OFFSET TO NEXT STRUCT IS NULL
+	jne parse_dir ; IF NOT NULL KEEP LOOPING
 	; #########
 	; # EPILOGUE
 	; # STACK
@@ -120,3 +161,20 @@ _start:
 	mov rax, 60
 	mov rdi, 0
 	syscall
+	; #### DEBUG_PRINT #####
+	push rsi
+	push rax
+	push rdi
+	push rdx
+	push rcx
+	mov rsi, rdx
+	mov rax, 1
+	mov rdi, 1
+	mov rdx, 7
+	syscall
+	pop rcx
+	pop rdx
+	pop rdi
+	pop rax
+	pop rsi
+	; ####################

@@ -12,6 +12,14 @@
 ; kernel call 217, 78 for 32 bits version
 ; int getdents64(unsigned int fd, struct linux_dirent64 *dirp, unsigned int count);
 ;	returns number of bytes read, -1 error
+;	struct linux_dirent64 {
+;		ino64_t        d_ino;    /* 64-bit inode number */ 64bits = 8 bytes
+;		off64_t        d_off;    /* 64-bit offset to next structure */ 8 bytes
+;		unsigned short d_reclen; /* Size of this dirent */ 2 bytes
+;		unsigned char  d_type;   /* File type */ 1 bytes
+;		----------- D_NAME START 19 BYTES FROM START --------------------
+;		char           d_name[]; /* Filename (null-terminated) */
+;};
 ;______________________________________________________________________________
 ; kernel call 3
 ; int close(int fd);
@@ -55,12 +63,12 @@ search:
 	mov rdi, rsp ; STOCK RSP IN RDI SO I CAN ADD GETDENTS RET TO DETERMINE THE SIZE
 	add rdi, rax ; THE END OF OUR RET STRUCT STORED IN RDI
 	;
-	add rsi, 10 ; D_NAME (10 BYTES)
+	add rsi, 19 ; D_NAME (19 BYTES FROM START OF STRUCT)
 
 	; #########
 	mov rax, 1
 	mov rdi, 1
-	mov rdx, 10
+	mov rdx, 19
 	syscall
 	; #########
 	; # EPILOGUE

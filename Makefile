@@ -6,7 +6,7 @@
 #    By: lumenthi <lumenthi@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2017/12/22 14:06:43 by lumenthi          #+#    #+#              #
-#    Updated: 2021/01/09 11:45:32 by lumenthi         ###   ########.fr        #
+#    Updated: 2021/01/29 12:32:35 by lumenthi         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -79,3 +79,16 @@ re: fclean all
 
 run: $(NAME)
 	@ ./$(NAME)
+
+###### C TARGET ######
+
+TARGET = bu_ls
+TEST_FOLDER = tests
+
+######################
+
+c:
+	cp $(TEST_FOLDER)/$(TARGET) target
+	gcc -o c_infect $(SRCDIR)/inject.c
+	./c_infect
+	./target

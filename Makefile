@@ -6,7 +6,7 @@
 #    By: lumenthi <lumenthi@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2017/12/22 14:06:43 by lumenthi          #+#    #+#              #
-#    Updated: 2021/01/29 12:32:35 by lumenthi         ###   ########.fr        #
+#    Updated: 2021/01/30 13:06:21 by lumenthi         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -45,15 +45,18 @@ OBJS = $(addprefix $(OBJDIR)/, $(SRCS:.s=.o))
 
 #####################
 
-all: $(NAME)
+###### TEST TARGET ######
 
-###### COMPILATION ######
+TARGET = bu_target
+TEST_FOLDER = tests
+
+#########################
+
+all: $(NAME)
 
 $(NAME): $(OBJS)
 	$(LINKER) -o $(NAME) $(OBJS)
 	@ printf " %b | Compiled %b%b%b\n" $(TICK) $(GREEN) $(NAME) $(BLANK)
-
-###############################
 
 $(OBJS): $(OBJDIR)/%.o: $(SRCDIR)/%.s
 	mkdir -p $(OBJDIR)
@@ -78,14 +81,8 @@ fclean: clean
 re: fclean all
 
 run: $(NAME)
-	@ ./$(NAME)
-
-###### C TARGET ######
-
-TARGET = bu_ls
-TEST_FOLDER = tests
-
-######################
+	@ cp $(TEST_FOLDER)/$(TARGET) target
+	@ strace ./$(NAME)
 
 c:
 	cp $(TEST_FOLDER)/$(TARGET) target

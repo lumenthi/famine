@@ -6,7 +6,7 @@
 #    By: lumenthi <lumenthi@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2017/12/22 14:06:43 by lumenthi          #+#    #+#              #
-#    Updated: 2021/01/30 13:06:21 by lumenthi         ###   ########.fr        #
+#    Updated: 2021/02/01 15:26:07 by lumenthi         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -15,8 +15,9 @@
 NAME = infect
 
 LINKER = ld
+LINKER_FLAGS = --omagic # Make .text segment RWE to simulate .data env for our virus
 COMPILER = nasm
-FLAGS = -f elf64
+COMPILER_FLAGS = -f elf64
 
 GREEN = '\033[4;32m'
 RED = '\033[4;31m'
@@ -55,12 +56,12 @@ TEST_FOLDER = tests
 all: $(NAME)
 
 $(NAME): $(OBJS)
-	$(LINKER) -o $(NAME) $(OBJS)
+	$(LINKER) $(LINKER_FLAGS) -o $(NAME) $(OBJS)
 	@ printf " %b | Compiled %b%b%b\n" $(TICK) $(GREEN) $(NAME) $(BLANK)
 
 $(OBJS): $(OBJDIR)/%.o: $(SRCDIR)/%.s
 	mkdir -p $(OBJDIR)
-	$(COMPILER) $(FLAGS) -o $@ $<
+	$(COMPILER) $(COMPILER_FLAGS) -o $@ $<
 
 clean:
 	@ test -d $(OBJDIR) && \
@@ -87,5 +88,5 @@ run: $(NAME)
 c:
 	cp $(TEST_FOLDER)/$(TARGET) target
 	gcc -o c_infect $(SRCDIR)/inject.c
-	./c_infect
+	strace ./c_infect
 	./target

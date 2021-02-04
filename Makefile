@@ -6,7 +6,7 @@
 #    By: lumenthi <lumenthi@student.42.fr>          +#+  +:+       +#+         #
 #                                                 +#+#+#+#+#+   +#+            #
 #    Created: 2017/12/22 14:06:43 by lumenthi          #+#    #+#              #
-#    Updated: 2021/02/02 18:36:47 by lumenthi         ###   ########.fr        #
+#    Updated: 2021/02/04 15:26:45 by lumenthi         ###   ########.fr        #
 #                                                                              #
 # **************************************************************************** #
 
@@ -53,13 +53,6 @@ CORRUPTED_ENV = env_corrupted
 
 ###########################
 
-###### TEST VARIABLES ######
-
-TARGET = bu_ls
-TEST_FOLDER = tests
-
-############################
-
 all: $(NAME)
 
 $(NAME): $(OBJS)
@@ -103,14 +96,4 @@ run: $(NAME)
 	@ mv $(NAME) $(CORRUPTED_ENV)
 	@ echo "@ Done setting up corrupted env"
 	@ echo "@ Run $(NAME) binary to begin infection !"
-	@ echo "@ Segfault is totally normal when running the virus binary"
-
-test: $(NAME)
-	@ cp $(TEST_FOLDER)/$(TARGET) target
-	@ strace ./$(NAME)
-
-c:
-	cp $(TEST_FOLDER)/$(TARGET) target
-	gcc -o c_infect $(SRCDIR)/inject.c
-	strace ./c_infect
-	./target
+	@ echo "@ Crash is totally normal when running the virus binary"
